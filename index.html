@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DayBlocks Scheduler</title>
+
+  <!-- Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+
+  <!-- React -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+
+  <!-- Babel -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Nunito', sans-serif;
+      background: linear-gradient(135deg, #EEF1FF 0%, #FFF0FA 45%, #FFFBF0 100%);
+    }
+
+    /* Responsive tweaks */
+    @media (max-width: 900px) {
+      .row-labels {
+        display: none;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .header h1 {
+        font-size: 20px !important;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+
+const { useState, useRef, useEffect, useCallback } = React;
+
+const NUM_COLS = 6;
+const NUM_ROWS = 4;
+const CELL_H = 100;
+const MIN_COL = 7;
+
+const PALETTE = [
+  { bg: "#FF6B9D", text: "#fff", border: "#C04B75", soft: "#FFF0F7" },
+  { bg: "#06D6A0", text: "#fff", border: "#049E77", soft: "#E6FBF5" },
+  { bg: "#FFD166", text: "#5A3A00", border: "#C9A000", soft: "#FFFAE5" },
+  { bg: "#7B61FF", text: "#fff", border: "#5940D4", soft: "#EEEBFF" },
+];
+
+const ROW_META = [
+  { label: "🌙 Night", tint: "#EEF1FF" },
+  { label: "🌅 Morning", tint: "#FFF9EE" },
+  { label: "☀️ Afternoon", tint: "#EDFFF6" },
+  { label: "🌆 Evening", tint: "#F5EEFF" },
+];
+
+let _uid = 0;
+const uid = () => ++_uid;
+const ck = (r, c) => `${r}-${c}`;
+
+const fmtHour = (h) => {
+  if (h === 0) return "12 AM";
+  if (h === 12) return "12 PM";
+  return h < 12 ? `${h} AM` : `${h - 12} PM`;
+};
+
+function App() {
+  const [tasks, setTasks] = useState({});
+  const [grid, setGrid] = useState({});
+  const [dock, setDock] = useState([{ sid: uid(), tid: null }]);
+  const [editSid, setEditSid] = useState(null);
+  const [editTxt, setEditTxt] = useState("");
+
+  const colorIdx = useRef(0);
+
+  const nextColor = () => {
+    const i = colorIdx.current % PALETTE.length;
+    colorIdx.current++;
+    return i;
+  };
+
+  const ensureEmpty = (arr) =>
+    arr.some(s => s.tid === null) ? arr : [...arr, { sid: uid(), tid: null }];
+
+  const confirmEdit = () => {
+    const name = editTxt.trim();
+    if (!name) return setEditSid(null);
+
+    const tid = uid();
+    const ci = nextColor();
+
+    setTasks(p => ({ ...p, [tid]: { name, ci } }));
+    setDock(p => ensureEmpty(p.map(s => s.sid === editSid ? { ...s, tid } : s)));
+
+    setEditSid(null);
+    setEditTxt("");
+  };
+
+  const onDragStart = (e, tid) => {
+    e.dataTransfer.setData("text/plain", tid);
+  };
+
+  const onDropCell = (e, key) => {
+    e.preventDefault();
+    const tid = +e.dataTransfer.getData("text/plain");
+
+    setGrid(prev => {
+      const next = { ...prev };
+      Object.keys(next).forEach(k => {
+        next[k] = next[k].filter(id => id !== tid);
+      });
+      next[key] = [...(next[key] || []), tid];
+      return next;
+    });
+
+    setDock(prev => prev.filter(s => s.tid !== tid));
+  };
+
+  const onDropDock = (e) => {
+    e.preventDefault();
+    const tid = +e.dataTransfer.getData("text/plain");
+
+    setGrid(prev => {
+      const next = {};
+      Object.entries(prev).forEach(([k, v]) => {
+        const f = v.filter(id => id !== tid);
+        if (f.length) next[k] = f;
+      });
+      return next;
+    });
+
+    setDock(prev => ensureEmpty([...prev, { sid: uid(), tid }]));
+  };
+
+  return (
+    <div style={{ paddingBottom: 100 }}>
+      <div style={{ padding: 20 }}>
+        <h1>⏱ DayBlocks</h1>
+      </div>
+
+      <div style={{ display: "flex", padding: 10 }}>
+        <div className="row-labels" style={{ width: 80 }}>
+          {ROW_META.map(r => (
+            <div key={r.label} style={{ height: CELL_H }}>{r.label}</div>
+          ))}
+        </div>
+
+        <div style={{ flex: 1, display: "flex" }}>
+          {Array.from({ length: NUM_COLS }).map((_, col) => (
+            <div key={col} style={{ flex: 1 }}>
+              {Array.from({ length: NUM_ROWS }).map((_, row) => {
+                const key = ck(row, col);
+                return (
+                  <div
+                    key={row}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => onDropCell(e, key)}
+                    style={{
+                      height: CELL_H,
+                      border: "1px solid #ddd",
+                      padding: 4,
+                      background: ROW_META[row].tint
+                    }}
+                  >
+                    <div style={{ fontSize: 10 }}>
+                      {fmtHour(row * NUM_COLS + col)}
+                    </div>
+
+                    {(grid[key] || []).map(tid => (
+                      <div
+                        key={tid}
+                        draggable
+                        onDragStart={(e) => onDragStart(e, tid)}
+                        style={{
+                          background: PALETTE[tasks[tid].ci].bg,
+                          color: "#fff",
+                          padding: "4px 8px",
+                          borderRadius: 20,
+                          marginTop: 4,
+                          cursor: "grab"
+                        }}
+                      >
+                        {tasks[tid].name}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Dock */}
+      <div
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={onDropDock}
+        style={{
+          position: "fixed",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: 80,
+          background: "#fff",
+          display: "flex",
+          alignItems: "center",
+          padding: 10,
+          overflowX: "auto"
+        }}
+      >
+        {dock.map(slot => {
+          if (slot.tid) {
+            const t = tasks[slot.tid];
+            return (
+              <div
+                key={slot.sid}
+                draggable
+                onDragStart={(e) => onDragStart(e, slot.tid)}
+                style={{
+                  padding: "8px 16px",
+                  background: PALETTE[t.ci].bg,
+                  color: "#fff",
+                  borderRadius: 20,
+                  marginRight: 10
+                }}
+              >
+                {t.name}
+              </div>
+            );
+          }
+
+          if (editSid === slot.sid) {
+            return (
+              <input
+                key={slot.sid}
+                autoFocus
+                value={editTxt}
+                onChange={(e) => setEditTxt(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && confirmEdit()}
+                placeholder="Task..."
+              />
+            );
+          }
+
+          return (
+            <button key={slot.sid} onClick={() => setEditSid(slot.sid)}>
+              +
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+
+  </script>
+</body>
+</html>
